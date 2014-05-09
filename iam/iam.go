@@ -4,7 +4,7 @@ package iam
 
 import (
 	"encoding/xml"
-	"launchpad.net/goamz/aws"
+	"github.com/pub-burrito/goamz/aws"
 	"net/http"
 	"net/url"
 	"strconv"

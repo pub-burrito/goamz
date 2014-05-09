@@ -12,20 +12,25 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"github.com/pub-burrito/goamz/aws"
 	"io"
 	"io/ioutil"
-	"launchpad.net/goamz/aws"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const debug = false
+var debug = false
+
+func SetDebug(v bool) {
+	debug = v
+}
 
 // The S3 type encapsulates operations with an S3 region.
 type S3 struct {
@@ -78,6 +83,48 @@ func (s3 *S3) Bucket(name string) *Bucket {
 	}
 	return &Bucket{s3, name}
 }
+
+// PJW START
+type ListAllMyBucketsResult struct {
+	Buckets []struct {
+		CreationDate string
+		Name         string
+	} `xml:"Buckets>Bucket"`
+	Owner Owner
+}
+
+func (s3 *S3) ListBuckets() (result *ListAllMyBucketsResult, err error) {
+	req := &request{
+		method:  "GET",
+		baseurl: s3.Region.S3Endpoint,
+	}
+	result = &ListAllMyBucketsResult{}
+	for attempt := attempts.Start(); attempt.Next(); {
+		err = s3.query(req, result)
+		if !shouldRetry(err) {
+			break
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	//buckets = make([]*Bucket, len(result.Buckets))
+	//for i := range buckets {
+	//	info := result.Buckets[i]
+	//	b := s3.Bucket(info.Name)
+	//	b.CreationDate, err = time.Parse(time.RFC3339Nano, info.CreationDate)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	b.Owner = result.Owner
+	//	buckets[i] = b
+	//}
+	//return buckets, nil
+	return result, nil
+
+}
+
+// PJW END
 
 var createBucketConfiguration = `<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"> 
   <LocationConstraint>%s</LocationConstraint> 
@@ -401,6 +448,7 @@ func (s3 *S3) query(req *request, resp interface{}) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("HRESP:", hresp, "\nBODY:", hresp.Body)
 	if resp != nil {
 		err = xml.NewDecoder(hresp.Body).Decode(resp)
 	}
@@ -443,6 +491,7 @@ func (s3 *S3) prepare(req *request) error {
 				}
 				req.baseurl = strings.Replace(req.baseurl, "${bucket}", req.bucket, -1)
 			}
+			fmt.Println("BUCKET NOT EMPTY... ", req.baseurl)
 			req.signpath = "/" + req.bucket + req.signpath
 		}
 	}
@@ -487,6 +536,15 @@ func (s3 *S3) run(req *request) (*http.Response, error) {
 		hreq.Body = ioutil.NopCloser(req.payload)
 	}
 
+	if debug {
+		dump, err := httputil.DumpRequestOut(&hreq, true)
+		if err != nil {
+			log.Println(err)
+		} else {
+			os.Stderr.Write(dump)
+			os.Stderr.Write([]byte{'\n', '\n'})
+		}
+	}
 	hresp, err := http.DefaultClient.Do(&hreq)
 	if err != nil {
 		return nil, err
